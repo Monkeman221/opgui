@@ -3,19 +3,24 @@ package com.example.opgui;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.item.ItemStack;
 
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-/** A small self-drawn dropdown menu (header + scrollable list that opens above everything else). */
+/** A self-drawn dropdown: a header plus a scrollable list that opens on top of everything else. */
 public class Dropdown<T> {
+    /** Draws a 16x16 icon (item, player head...) at the given position. */
+    @FunctionalInterface
+    public interface IconDrawer<T> {
+        void draw(DrawContext ctx, T item, int x, int y);
+    }
+
     private static final int HEADER_H = 20;
 
     private final TextRenderer tr;
     private final Function<T, String> label;
-    private final Function<T, ItemStack> icon; // may be null
+    private final IconDrawer<T> icon; // may be null
     private final Consumer<T> onSelect;
     private final int maxRows;
     private final int rowH;
@@ -30,7 +35,7 @@ public class Dropdown<T> {
     private String placeholder = "Select...";
 
     public Dropdown(TextRenderer tr, int x, int y, int w, int maxRows,
-                    Function<T, String> label, Function<T, ItemStack> icon, Consumer<T> onSelect) {
+                    Function<T, String> label, IconDrawer<T> icon, Consumer<T> onSelect) {
         this.tr = tr;
         this.x = x;
         this.y = y;
@@ -39,7 +44,7 @@ public class Dropdown<T> {
         this.label = label;
         this.icon = icon;
         this.onSelect = onSelect;
-        this.rowH = icon != null ? 18 : 14;
+        this.rowH = icon != null ? 20 : 14;
     }
 
     public void setPlaceholder(String s) {
@@ -84,7 +89,6 @@ public class Dropdown<T> {
         int screenH = MinecraftClient.getInstance().getWindow().getScaledHeight();
         int below = y + HEADER_H;
         int lh = listHeight();
-        // open downward if it fits (or if it wouldn't fit upward either); otherwise open upward
         if (below + lh <= screenH || y - lh < 0) return below;
         return y - lh;
     }
@@ -149,35 +153,44 @@ public class Dropdown<T> {
 
     // ---- drawing ----
 
+    private void chevron(DrawContext ctx, int cx, int cy, boolean up, int color) {
+        for (int i = 0; i < 3; i++) {
+            int half = up ? i : 2 - i;
+            ctx.fill(cx - half, cy + i, cx + half + 1, cy + i + 1, color);
+        }
+    }
+
     public void renderHeader(DrawContext ctx, int mx, int my) {
         if (!visible) return;
 
         boolean hover = inHeader(mx, my);
-        ctx.fill(x, y, x + w, y + HEADER_H, 0xFFA0A0A0);
-        ctx.fill(x + 1, y + 1, x + w - 1, y + HEADER_H - 1, (hover || open) ? 0xFF3C3C3C : 0xFF1E1E1E);
+        ctx.fill(x, y, x + w, y + HEADER_H, open ? Theme.ACCENT : Theme.BORDER);
+        ctx.fill(x + 1, y + 1, x + w - 1, y + HEADER_H - 1,
+                (hover || open) ? Theme.lighten(Theme.PANEL_LIGHT, 0.08f) : Theme.PANEL_LIGHT);
 
         T sel = getSelected();
         String text = sel != null ? label.apply(sel) : placeholder;
         int tx = x + 6;
         if (icon != null && sel != null) {
-            ctx.drawItem(icon.apply(sel), x + 3, y + 2);
+            icon.draw(ctx, sel, x + 3, y + 2);
             tx = x + 24;
         }
-        ctx.drawText(tr, tr.trimToWidth(text, w - (tx - x) - 14), tx, y + 6, 0xFFFFFFFF, false);
-        ctx.drawText(tr, open ? "^" : "v", x + w - 11, y + 6, 0xFFAAAAAA, false);
+        ctx.drawText(tr, tr.trimToWidth(text, w - (tx - x) - 16), tx, y + 6,
+                sel != null ? Theme.TEXT : Theme.MUTED, false);
+        chevron(ctx, x + w - 10, y + 9, open, Theme.MUTED);
     }
 
-    /** Call this last (inside a raised z-offset) so the list draws on top of other widgets. */
+    /** Call this last, after ctx.createNewRootLayer(), so the list draws on top of other widgets. */
     public void renderList(DrawContext ctx, int mx, int my) {
         if (!visible || !open) return;
 
         int lt = listTop();
         int lh = listHeight();
-        ctx.fill(x, lt, x + w, lt + lh, 0xFFA0A0A0);
-        ctx.fill(x + 1, lt + 1, x + w - 1, lt + lh - 1, 0xFF101010);
+        ctx.fill(x, lt, x + w, lt + lh, Theme.ACCENT);
+        ctx.fill(x + 1, lt + 1, x + w - 1, lt + lh - 1, 0xFF11161C);
 
         if (options.isEmpty()) {
-            ctx.drawText(tr, "No matches", x + 6, lt + 4, 0xFF888888, false);
+            ctx.drawText(tr, "No matches", x + 6, lt + 4, Theme.MUTED, false);
             return;
         }
 
@@ -190,20 +203,20 @@ public class Dropdown<T> {
             int ry = lt + 1 + i * rowH;
 
             if (idx == selected) {
-                ctx.fill(x + 1, ry, x + w - 1, ry + rowH, 0xFF2D4A2D);
+                ctx.fill(x + 1, ry, x + w - 1, ry + rowH, 0xFF1F3B2A);
             }
             boolean hov = mx >= x + 1 && mx < x + w - 1 && my >= ry && my < ry + rowH;
             if (hov) {
-                ctx.fill(x + 1, ry, x + w - 1, ry + rowH, 0xFF44446A);
+                ctx.fill(x + 1, ry, x + w - 1, ry + rowH, 0xFF2D3F5E);
             }
 
             int tx = x + 6;
             if (icon != null) {
-                ctx.drawItem(icon.apply(opt), x + 3, ry + 1);
+                icon.draw(ctx, opt, x + 3, ry + 2);
                 tx = x + 24;
             }
             int ty = ry + (rowH - 8) / 2;
-            ctx.drawText(tr, tr.trimToWidth(label.apply(opt), x + w - tx - (bar ? 10 : 4)), tx, ty, 0xFFFFFFFF, false);
+            ctx.drawText(tr, tr.trimToWidth(label.apply(opt), x + w - tx - (bar ? 10 : 4)), tx, ty, Theme.TEXT, false);
         }
 
         if (bar) {
@@ -211,7 +224,8 @@ public class Dropdown<T> {
             int thumbH = Math.max(8, trackH * n / options.size());
             int maxScroll = options.size() - n;
             int thumbY = lt + 1 + (trackH - thumbH) * scroll / maxScroll;
-            ctx.fill(x + w - 5, thumbY, x + w - 2, thumbY + thumbH, 0xFF8A8A8A);
+            ctx.fill(x + w - 5, lt + 1, x + w - 2, lt + 1 + trackH, 0xFF1B222B);
+            ctx.fill(x + w - 5, thumbY, x + w - 2, thumbY + thumbH, 0xFF6E7681);
         }
     }
 }
